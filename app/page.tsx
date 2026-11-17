@@ -29,7 +29,7 @@ export default function CommandCenter() {
 
       if (res.ok) {
         setStatus('success');
-        setLog(`SUCCESS: ${data.message}\n\nCheck terminal for full agent telemetry.`);
+        setLog(`SUCCESS: ${data.message}\n\n${data.telemetry}`);
       } else {
         setStatus('error');
         setLog(data.detail || 'Agent execution failed.');
