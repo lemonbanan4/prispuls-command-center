@@ -6,6 +6,12 @@ export default function CommandCenter() {
   const [maxPrice, setMaxPrice] = useState('200');
   const [email, setEmail] = useState('test@cogcoretech.com');
   const [postalCode, setPostalCode] = useState('11122');
+
+  // Payment state
+  const [cardNumber, setCardNumber] = useState('4242424242424242');
+  const [cardExpiry, setCardExpiry] = useState('12/28');
+  const [cardCvc, setCardCvc] = useState('123');
+
   const [status, setStatus] = useState<'idle' | 'hunting' | 'success' | 'error'>('idle');
   const [log, setLog] = useState('');
 
@@ -21,7 +27,10 @@ export default function CommandCenter() {
           url,
           max_price: parseInt(maxPrice),
           email,
-          postal_code: postalCode
+          postal_code: postalCode,
+          card_number: cardNumber,
+          card_expiry: cardExpiry,
+          card_cvc: cardCvc
         })
       });
 
@@ -94,29 +103,45 @@ export default function CommandCenter() {
             </div>
           </div>
 
-          <button
-            onClick={executeHunt}
-            disabled={status === 'hunting' || !url}
-            className="w-full bg-white text-black px-6 py-4 rounded-xl text-sm font-bold uppercase tracking-wider hover:bg-gray-200 disabled:opacity-50 transition-all shadow-[inset_0_-4px_0_rgba(0,0,0,0.2)] active:shadow-none active:translate-y-1"
-          >
-            {status === 'hunting' ? 'Agent Active: Checking Price & DOM...' : 'Deploy Autonomous Agent'}
-          </button>
-        </div>
-
-        <div className="bg-black border border-white/10 p-6 rounded-xl font-mono text-sm shadow-inner">
-          <div className="flex items-center gap-2 mb-4 pb-2 border-b border-white/10">
-            <div className={`w-2 h-2 rounded-full ${status === 'hunting' ? 'bg-yellow-500 animate-pulse' :
-              status === 'success' ? 'bg-green-500' :
-                status === 'error' ? 'bg-red-500' : 'bg-white/20'
-              }`} />
-            <span className="text-white/50 uppercase tracking-widest text-xs">Mission Telemetry</span>
+          {/* Payment inputs */}
+          <div>
+            <label className="block text-xs uppercase tracking-widest text-white/50 mb-2">Card Number</label>
+            <input type="text" value={cardNumber} onChange={(e) => setCardNumber(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-white/30" />
           </div>
-          <p className={`whitespace-pre-wrap ${status === 'error' ? 'text-red-400' : status === 'success' ? 'text-green-400' : 'text-white/70'}`}>
-            {log || '> Awaiting target configuration...'}
-          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs uppercase tracking-widest text-white/50 mb-2">Expiry</label>
+              <input type="text" value={cardExpiry} onChange={(e) => setCardExpiry(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-white/30" />
+            </div>
+            <div>
+              <label className="block text-xs uppercase tracking-widest text-white/50 mb-2">CVC</label>
+              <input type="text" value={cardCvc} onChange={(e) => setCardCvc(e.target.value)} className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-white/30" />
+            </div>
+          </div>
         </div>
 
+        <button
+          onClick={executeHunt}
+          disabled={status === 'hunting' || !url}
+          className="w-full bg-white text-black px-6 py-4 rounded-xl text-sm font-bold uppercase tracking-wider hover:bg-gray-200 disabled:opacity-50 transition-all shadow-[inset_0_-4px_0_rgba(0,0,0,0.2)] active:shadow-none active:translate-y-1"
+        >
+          {status === 'hunting' ? 'Agent Active: Checking Price & DOM...' : 'Deploy Autonomous Agent'}
+        </button>
       </div>
+
+      <div className="bg-black border border-white/10 p-6 rounded-xl font-mono text-sm shadow-inner">
+        <div className="flex items-center gap-2 mb-4 pb-2 border-b border-white/10">
+          <div className={`w-2 h-2 rounded-full ${status === 'hunting' ? 'bg-yellow-500 animate-pulse' :
+            status === 'success' ? 'bg-green-500' :
+              status === 'error' ? 'bg-red-500' : 'bg-white/20'
+            }`} />
+          <span className="text-white/50 uppercase tracking-widest text-xs">Mission Telemetry</span>
+        </div>
+        <p className={`whitespace-pre-wrap ${status === 'error' ? 'text-red-400' : status === 'success' ? 'text-green-400' : 'text-white/70'}`}>
+          {log || '> Awaiting target configuration...'}
+        </p>
+      </div>
+
     </div>
   );
 }
