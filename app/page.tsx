@@ -1,10 +1,10 @@
 'use client';
-import { type ReactNode, Suspense, useEffect, useState } from 'react';
+import { type ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
+/** Stripe Payment Link — Black Friday Pass (79 kr). */
 const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/fZu9ATgylbtP2Yc5T0g7e00';
-const PASS_STORAGE_KEY = 'prispuls_pass_unlocked';
-const VIP_ACCESS_CODE = 'VIP2026';
+const PASS_TOKEN_KEY = 'prispuls_pass_token';
 
 const inputClass =
   'w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30';
@@ -16,6 +16,8 @@ function CommandCenterContent() {
   const [maxPrice, setMaxPrice] = useState('200');
   const [targetLoadedFromQuery, setTargetLoadedFromQuery] = useState(false);
   const [passUnlocked, setPassUnlocked] = useState(false);
+  const [passToken, setPassToken] = useState<string | null>(null);
+  const [passVerifyMessage, setPassVerifyMessage] = useState('');
   const [accessCode, setAccessCode] = useState('');
 
   const [firstName, setFirstName] = useState('');
@@ -31,8 +33,35 @@ function CommandCenterContent() {
 
   const [status, setStatus] = useState<'idle' | 'hunting' | 'success' | 'error'>('idle');
   const [log, setLog] = useState('');
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const API_BASE = 'https://prispuls-agent-backend-production.up.railway.app';
+
+  const clearPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => clearPolling();
+  }, []);
+
+  useEffect(() => {
+    if (status !== 'hunting') {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const tick = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+
+    return () => clearInterval(tick);
+  }, [status]);
 
   const checkoutReady =
     url.trim() !== '' &&
@@ -46,16 +75,48 @@ function CommandCenterContent() {
     cardExpiry.trim() !== '' &&
     cardCvc.trim() !== '';
 
+  const persistPassToken = (token: string) => {
+    localStorage.setItem(PASS_TOKEN_KEY, token);
+    setPassToken(token);
+    setPassUnlocked(true);
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (localStorage.getItem(PASS_STORAGE_KEY) === 'true') {
-      setPassUnlocked(true);
-    }
+    localStorage.removeItem('prispuls_pass_unlocked');
+
+    const stored = localStorage.getItem(PASS_TOKEN_KEY);
+    if (!stored) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/pass/check`, {
+          headers: { 'X-Prispuls-Pass': stored },
+        });
+        const data = await res.json();
+        if (!cancelled && data.unlocked) {
+          setPassToken(stored);
+          setPassUnlocked(true);
+        } else if (!cancelled) {
+          localStorage.removeItem(PASS_TOKEN_KEY);
+        }
+      } catch {
+        if (!cancelled) {
+          localStorage.removeItem(PASS_TOKEN_KEY);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     const urlParam = searchParams.get('url');
     const maxPriceParam = searchParams.get('maxPrice');
+    const sessionId = searchParams.get('session_id');
     if (urlParam) {
       setUrl(urlParam);
       setTargetLoadedFromQuery(true);
@@ -63,21 +124,57 @@ function CommandCenterContent() {
     if (maxPriceParam) {
       setMaxPrice(maxPriceParam);
     }
-    if (searchParams.get('paid') === 'true') {
-      localStorage.setItem(PASS_STORAGE_KEY, 'true');
-      setPassUnlocked(true);
-    }
+
+    if (!sessionId) return;
+
+    let cancelled = false;
+    setPassVerifyMessage('Confirming Stripe payment…');
+    (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/pass/verify?session_id=${encodeURIComponent(sessionId)}`,
+        );
+        const data = await res.json();
+        if (!cancelled && res.ok && data.pass_token) {
+          persistPassToken(data.pass_token);
+          setPassVerifyMessage('Black Friday Pass unlocked.');
+        } else if (!cancelled) {
+          setPassVerifyMessage(data.detail ?? 'Payment could not be verified yet. Refresh in a moment.');
+        }
+      } catch {
+        if (!cancelled) {
+          setPassVerifyMessage('Could not reach the pass verification service.');
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [searchParams]);
 
-  const tryAccessCode = () => {
-    if (accessCode.trim() === VIP_ACCESS_CODE) {
-      localStorage.setItem(PASS_STORAGE_KEY, 'true');
-      setPassUnlocked(true);
+  const tryAccessCode = async () => {
+    setPassVerifyMessage('');
+    try {
+      const res = await fetch(`${API_BASE}/api/pass/redeem-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: accessCode.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.pass_token) {
+        persistPassToken(data.pass_token);
+        setPassVerifyMessage('Access code accepted.');
+      } else {
+        setPassVerifyMessage(data.detail ?? 'Invalid access code.');
+      }
+    } catch {
+      setPassVerifyMessage('Could not validate access code.');
     }
   };
 
   const executeHunt = async () => {
-    if (!passUnlocked) return;
+    if (!passUnlocked || !passToken) return;
 
     setStatus('hunting');
     setLog('Dispatching autonomous agent to cloud worker...');
@@ -85,7 +182,10 @@ function CommandCenterContent() {
     try {
       const res = await fetch(`${API_BASE}/api/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Prispuls-Pass': passToken,
+        },
         body: JSON.stringify({
           url,
           max_price: parseInt(maxPrice, 10),
@@ -118,20 +218,25 @@ function CommandCenterContent() {
         throw new Error(message);
       }
 
-      const pollingInterval = setInterval(async () => {
+      clearPolling();
+
+      const pollStatus = async () => {
         const statusRes = await fetch(`${API_BASE}/api/status/${data.job_id}`);
         const statusData = await statusRes.json();
 
-        setLog(statusData.telemetry);
+        setLog(statusData.telemetry ?? '');
 
         if (statusData.status === 'success') {
           setStatus('success');
-          clearInterval(pollingInterval);
+          clearPolling();
         } else if (statusData.status === 'error') {
           setStatus('error');
-          clearInterval(pollingInterval);
+          clearPolling();
         }
-      }, 5000);
+      };
+
+      await pollStatus();
+      pollingRef.current = setInterval(pollStatus, 5000);
     } catch (error) {
       setStatus('error');
       setLog(
@@ -283,6 +388,12 @@ function CommandCenterContent() {
             </div>
           </FormSection>
 
+          {passVerifyMessage && (
+            <p className="text-xs text-cyan-300/90 border border-cyan-500/20 bg-cyan-500/5 rounded-xl px-4 py-2">
+              {passVerifyMessage}
+            </p>
+          )}
+
           {!passUnlocked && (
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-white/10">
               <label className="text-[10px] uppercase tracking-widest text-white/40 shrink-0">
@@ -316,7 +427,7 @@ function CommandCenterContent() {
             disabled={status === 'hunting' || !checkoutReady}
             className="w-full bg-white text-black px-6 py-4 rounded-xl text-sm font-bold uppercase tracking-wider hover:bg-gray-200 disabled:opacity-50 transition-all shadow-[inset_0_-4px_0_rgba(0,0,0,0.2)] active:shadow-none active:translate-y-1"
           >
-            {status === 'hunting' ? 'Agent Active: Checking Price & DOM...' : 'Deploy Autonomous Agent'}
+            {status === 'hunting' ? `Agent running… ${elapsedSeconds}s` : 'Deploy Autonomous Agent'}
           </button>
         ) : (
           <a
@@ -343,6 +454,9 @@ function CommandCenterContent() {
               }`}
             />
             <span className="text-white/50 uppercase tracking-widest text-xs">Mission Telemetry</span>
+            {status === 'hunting' && (
+              <span className="ml-auto text-[10px] tabular-nums text-cyan-400/90">{elapsedSeconds}s elapsed</span>
+            )}
           </div>
           <p
             className={`whitespace-pre-wrap ${
