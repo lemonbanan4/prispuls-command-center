@@ -1,9 +1,24 @@
 'use client';
-import { useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
-export default function CommandCenter() {
+function CommandCenterContent() {
+  const searchParams = useSearchParams();
   const [url, setUrl] = useState('');
   const [maxPrice, setMaxPrice] = useState('200');
+  const [targetLoadedFromQuery, setTargetLoadedFromQuery] = useState(false);
+
+  useEffect(() => {
+    const urlParam = searchParams.get('url');
+    const maxPriceParam = searchParams.get('maxPrice');
+    if (urlParam) {
+      setUrl(urlParam);
+      setTargetLoadedFromQuery(true);
+    }
+    if (maxPriceParam) {
+      setMaxPrice(maxPriceParam);
+    }
+  }, [searchParams]);
   const [email, setEmail] = useState('test@cogcoretech.com');
   const [postalCode, setPostalCode] = useState('11122');
 
@@ -73,6 +88,11 @@ export default function CommandCenter() {
         </header>
 
         <div className="bg-white/5 border border-white/10 p-6 rounded-2xl backdrop-blur-xl shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] space-y-6">
+          {targetLoadedFromQuery && (
+            <p className="inline-flex items-center self-start rounded-md border border-cyan-500/30 bg-cyan-500/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-cyan-300">
+              Target loaded from Prispuls
+            </p>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
@@ -157,5 +177,21 @@ export default function CommandCenter() {
       </div>
 
     </div>
+  );
+}
+
+function CommandCenterFallback() {
+  return (
+    <div className="min-h-screen bg-[#0a0a0a] text-white p-8 font-mono">
+      <div className="max-w-4xl mx-auto mt-12 text-white/50 text-sm">Loading command center…</div>
+    </div>
+  );
+}
+
+export default function CommandCenter() {
+  return (
+    <Suspense fallback={<CommandCenterFallback />}>
+      <CommandCenterContent />
+    </Suspense>
   );
 }
