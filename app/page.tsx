@@ -15,12 +15,14 @@ export default function CommandCenter() {
   const [status, setStatus] = useState<'idle' | 'hunting' | 'success' | 'error'>('idle');
   const [log, setLog] = useState('');
 
+  const API_BASE = 'https://prispuls-agent-backend-production.up.railway.app';
+
   const executeHunt = async () => {
     setStatus('hunting');
-    setLog('Deploying autonomous agent with dynamic constraints...');
+    setLog('Dispatching autonomous agent to cloud worker...');
 
     try {
-      const res = await fetch('https://prispuls-agent-backend-production.up.railway.app/api/execute', {
+      const res = await fetch(`${API_BASE}/api/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -36,13 +38,25 @@ export default function CommandCenter() {
 
       const data = await res.json();
 
-      if (res.ok) {
-        setStatus('success');
-        setLog(`SUCCESS: ${data.message}\n\n${data.telemetry}`);
-      } else {
-        setStatus('error');
-        setLog(data.detail || 'Agent execution failed.');
-      }
+      if (!res.ok) throw new Error(data.detail || 'Agent execution failed.');
+
+      // 2. Start polling for status using the job_id
+      const pollingInterval = setInterval(async () => {
+        const statusRes = await fetch(`${API_BASE}/api/status/${data.job_id}`);
+        const statusData = await statusRes.json();
+
+        // Update log
+        setLog(statusData.telemetry);
+
+        if (statusData.status === 'success') {
+          setStatus('success');
+          clearInterval(pollingInterval);
+        } else if (statusData.status === 'error') {
+          setStatus('error');
+          clearInterval(pollingInterval);
+        }
+      }, 2000); // Poll every 2 seconds
+
     } catch (error) {
       setStatus('error');
       setLog('Critical failure: Could not connect to execution engine.');
