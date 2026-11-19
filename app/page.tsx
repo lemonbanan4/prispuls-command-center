@@ -5,6 +5,8 @@ import { useSearchParams } from 'next/navigation';
 /** Stripe Payment Link — Black Friday Pass (79 kr). */
 const STRIPE_PAYMENT_LINK = 'https://buy.stripe.com/fZu9ATgylbtP2Yc5T0g7e00';
 const PASS_TOKEN_KEY = 'prispuls_pass_token';
+const DEMO_PRODUCT_URL =
+  'https://www.inet.se/produkt/2228042/dell-27-alienware-aw2725dm-ips-qhd-180-hz';
 
 const inputClass =
   'w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30';
@@ -24,6 +26,7 @@ function CommandCenterContent() {
   const [lastName, setLastName] = useState('');
   const [phone, setPhone] = useState('');
   const [street, setStreet] = useState('');
+  const [city, setCity] = useState('');
   const [email, setEmail] = useState('');
   const [postalCode, setPostalCode] = useState('');
 
@@ -32,6 +35,7 @@ function CommandCenterContent() {
   const [cardCvc, setCardCvc] = useState('123');
 
   const [status, setStatus] = useState<'idle' | 'hunting' | 'success' | 'error'>('idle');
+  const [demoUpgradeRequired, setDemoUpgradeRequired] = useState(false);
   const [log, setLog] = useState('');
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -153,6 +157,23 @@ function CommandCenterContent() {
     };
   }, [searchParams]);
 
+  const fillDemoFields = () => {
+    if (!url.trim()) setUrl(DEMO_PRODUCT_URL);
+    if (!maxPrice.trim()) setMaxPrice('9999');
+    setFirstName('Anna');
+    setLastName('Andersson');
+    setEmail('demo@prispuls.com');
+    setPhone('0701234567');
+    setStreet('Storgatan 1');
+    setPostalCode('11122');
+    setCity('Stockholm');
+    setCardNumber('4242 4242 4242 4242');
+    setCardExpiry('12/28');
+    setCardCvc('123');
+    setDemoUpgradeRequired(false);
+    setPassVerifyMessage('Testuppgifter ifyllda — du kan köra en gratis demo.');
+  };
+
   const tryAccessCode = async () => {
     setPassVerifyMessage('');
     try {
@@ -174,28 +195,35 @@ function CommandCenterContent() {
   };
 
   const executeHunt = async () => {
-    if (!passUnlocked || !passToken) return;
+    if (!checkoutReady) return;
 
     setStatus('hunting');
-    setLog('Dispatching autonomous agent to cloud worker...');
+    setDemoUpgradeRequired(false);
+    setLog(
+      passUnlocked
+        ? 'Dispatching autonomous agent to cloud worker...'
+        : 'Startar gratis demo — agenten stoppar alltid före betalning...',
+    );
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (passToken) {
+      headers['X-Prispuls-Pass'] = passToken;
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/execute`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Prispuls-Pass': passToken,
-        },
+        headers,
         body: JSON.stringify({
           url,
           max_price: parseInt(maxPrice, 10),
           first_name: firstName,
           last_name: lastName,
           phone,
-          street,
+          street: [street.trim(), city.trim()].filter(Boolean).join(', '),
           email,
           postal_code: postalCode,
-          card_number: cardNumber,
+          card_number: cardNumber.replace(/\s/g, ''),
           card_expiry: cardExpiry,
           card_cvc: cardCvc,
         }),
@@ -215,6 +243,14 @@ function CommandCenterContent() {
           : typeof detail === 'string'
             ? detail
             : 'Agent execution failed.';
+
+        if (res.status === 402 || res.status === 429) {
+          setDemoUpgradeRequired(true);
+          setStatus('idle');
+          setLog(message);
+          return;
+        }
+
         throw new Error(message);
       }
 
@@ -269,6 +305,22 @@ function CommandCenterContent() {
               Target loaded from Prispuls
             </p>
           )}
+
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-4 rounded-xl border border-white/10 bg-black/30">
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-white/90">Fyll i testuppgifter (Demo)</p>
+              <p className="text-[11px] text-white/45 leading-relaxed max-w-xl">
+                Testa agenten riskfritt med fiktiva kortuppgifter – den stannar alltid före betalning.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={fillDemoFields}
+              className="shrink-0 px-4 py-2.5 rounded-xl border border-white/20 text-xs font-semibold uppercase tracking-wider text-white/80 hover:border-cyan-500/40 hover:text-cyan-200 hover:bg-white/5 transition-colors"
+            >
+              Fyll i testuppgifter
+            </button>
+          </div>
 
           <FormSection title="Target">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -353,6 +405,16 @@ function CommandCenterContent() {
                   className={inputClass}
                 />
               </div>
+              <div>
+                <label className={labelClass}>City</label>
+                <input
+                  type="text"
+                  value={city}
+                  onChange={(e) => setCity(e.target.value)}
+                  placeholder="Stockholm"
+                  className={inputClass}
+                />
+              </div>
             </div>
           </FormSection>
 
@@ -420,25 +482,44 @@ function CommandCenterContent() {
           )}
         </div>
 
-        {passUnlocked ? (
+        {demoUpgradeRequired && (
+          <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 space-y-3">
+            <p className="text-sm text-amber-100/95 leading-relaxed">{log}</p>
+            <a
+              href={STRIPE_PAYMENT_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full text-center bg-cyan-500/20 border border-cyan-400/60 text-cyan-100 px-6 py-3 rounded-xl text-sm font-bold uppercase tracking-wider hover:bg-cyan-500/30 transition-all"
+            >
+              Lås upp Black Friday-passet — 79 kr
+            </a>
+          </div>
+        )}
+
+        <div className="space-y-3">
           <button
             type="button"
             onClick={executeHunt}
             disabled={status === 'hunting' || !checkoutReady}
             className="w-full bg-white text-black px-6 py-4 rounded-xl text-sm font-bold uppercase tracking-wider hover:bg-gray-200 disabled:opacity-50 transition-all shadow-[inset_0_-4px_0_rgba(0,0,0,0.2)] active:shadow-none active:translate-y-1"
           >
-            {status === 'hunting' ? `Agent running… ${elapsedSeconds}s` : 'Deploy Autonomous Agent'}
+            {status === 'hunting'
+              ? `Agent running… ${elapsedSeconds}s`
+              : passUnlocked
+                ? 'Deploy Autonomous Agent'
+                : 'Testa agenten gratis (1 körning)'}
           </button>
-        ) : (
-          <a
-            href={STRIPE_PAYMENT_LINK}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block w-full text-center bg-cyan-500/20 border border-cyan-400/60 text-cyan-100 px-6 py-4 rounded-xl text-sm font-bold uppercase tracking-wider transition-all shadow-[0_0_24px_rgba(34,211,238,0.35)] hover:bg-cyan-500/30 hover:shadow-[0_0_32px_rgba(34,211,238,0.5)] hover:border-cyan-300/80"
-          >
-            Unlock Black Friday Pass — 79 kr
-          </a>
-        )}
+          {!passUnlocked && !demoUpgradeRequired && (
+            <a
+              href={STRIPE_PAYMENT_LINK}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block w-full text-center border border-cyan-400/40 text-cyan-200/90 px-6 py-3 rounded-xl text-xs font-bold uppercase tracking-wider hover:bg-cyan-500/10 transition-all"
+            >
+              Obegränsade körningar — Black Friday Pass 79 kr
+            </a>
+          )}
+        </div>
 
         <div className="bg-black border border-white/10 p-6 rounded-xl font-mono text-sm shadow-inner">
           <div className="flex items-center gap-2 mb-4 pb-2 border-b border-white/10">
